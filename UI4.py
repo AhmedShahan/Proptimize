@@ -167,7 +167,7 @@ def extract_response_parts(ai_response, current_draft, is_final_request=False):
     
     return updated_prompt, clarifying_question, False, None, None
 
-def stream_text(text, delay=0.01):
+def stream_text(text, delay=0.03):
     """Enhanced text streaming with better formatting"""
     placeholder = st.empty()
     streamed = ""
@@ -426,7 +426,11 @@ if user_message:
             st.session_state.draft_prompt = updated_prompt
             st.session_state.session_metrics["improvements"] += 1
             
-            st.balloons()
+            # Extended animation: Repeat balloons multiple times
+            for _ in range(3):
+                st.balloons()
+                time.sleep(1.5)
+            
             with st.chat_message("assistant"):
                 st.success("🎉 **Final Enhanced Prompt Generated!**")
                 
@@ -434,9 +438,46 @@ if user_message:
                 with col1:
                     st.markdown(f"**Quality Score:** {quality_score}/100")
                 with col2:
-                    if st.button("📋 Copy Prompt", key="copy_final"):
-                        st.code(updated_prompt, language="text")
-                        st.toast("✅ Prompt copied to clipboard!", icon="📋")
+                    # JavaScript for reliable clipboard copying
+                    st.markdown("""
+                    <button onclick="copyToClipboard()" class="copy-btn">📋 Copy Prompt</button>
+                    <script>
+                    function copyToClipboard() {
+                        const text = document.getElementById('final-prompt-text').innerText;
+                        navigator.clipboard.writeText(text).then(() => {
+                            const toast = document.createElement('div');
+                            toast.innerText = '✅ Prompt copied to clipboard!';
+                            toast.style.position = 'fixed';
+                            toast.style.bottom = '20px';
+                            toast.style.right = '20px';
+                            toast.style.background = '#10b981';
+                            toast.style.color = 'white';
+                            toast.style.padding = '10px 20px';
+                            toast.style.borderRadius = '5px';
+                            toast.style.zIndex = '1000';
+                            document.body.appendChild(toast);
+                            setTimeout(() => toast.remove(), 3000);
+                        });
+                    }
+                    </script>
+                    <style>
+                    .copy-btn {
+                        background: linear-gradient(90deg, #7c3aed, #db2777);
+                        color: white;
+                        padding: 12px 24px;
+                        border: none;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-size: 18px;
+                        font-weight: bold;
+                        transition: transform 0.2s, box-shadow 0.2s;
+                    }
+                    .copy-btn:hover {
+                        transform: scale(1.05);
+                        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+                    }
+                    </style>
+                    """, unsafe_allow_html=True)
                 with col3:
                     st.download_button(
                         label="💾 Download",
@@ -450,23 +491,29 @@ if user_message:
                     st.markdown(f"**Key Improvements:** {improvements}")
                 
                 st.markdown("---")
-                st.markdown("### 📜 **Your Final Prompt:**")
+                st.markdown("### 📜 **Your Final Prompt**")
                 with st.container():
                     st.markdown(f"""
-                    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                padding: 20px; 
-                                border-radius: 10px; 
-                                border: 2px solid #4a5568; 
-                                margin: 10px 0;'>
-                        <div style='background: white; 
-                                    padding: 20px; 
-                                    border-radius: 8px; 
-                                    color: #2d3748; 
-                                    font-family: monospace; 
+                    <div style='background: linear-gradient(135deg, #c4b5fd, #f9a8d4); 
+                                padding: 30px; 
+                                border-radius: 15px; 
+                                border: 3px solid #4b5563; 
+                                box-shadow: 0 6px 20px rgba(0,0,0,0.25); 
+                                margin: 20px 0;'>
+                        <div style='background: #ffffff; 
+                                    padding: 25px; 
+                                    border-radius: 10px; 
+                                    color: #1f2937; 
+                                    font-family: "Courier New", monospace; 
+                                    font-size: 18px; 
+                                    line-height: 1.8; 
                                     white-space: pre-wrap; 
-                                    word-wrap: break-word;
-                                    max-height: 400px;
-                                    overflow-y: auto;'>{updated_prompt}</div>
+                                    word-wrap: break-word; 
+                                    max-height: 400px; 
+                                    overflow-y: auto; 
+                                    border-left: 6px solid #7c3aed;'>
+                            <span id='final-prompt-text'>📝 {updated_prompt}</span>
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -505,7 +552,7 @@ if user_message:
                     - Specify desired output format
                     """)
                 
-                stream_text("✨ Your enhanced prompt is ready to use!")
+                stream_text("✨ Your enhanced prompt is ready to use!", delay=0.03)
         else:
             old_score = st.session_state.quality_score
             st.session_state.draft_prompt = updated_prompt
@@ -522,7 +569,7 @@ if user_message:
             
             with st.chat_message("assistant"):
                 st.info(f"📊 Quality Score: {old_score} → {new_score}")
-                stream_text(ai_display)
+                stream_text(ai_display, delay=0.03)
         
         st.rerun()
 
