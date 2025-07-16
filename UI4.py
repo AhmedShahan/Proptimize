@@ -8,6 +8,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_ollama import ChatOllama
 import plotly.graph_objects as go
+import plotly.express as px
 
 # Load env vars
 load_dotenv()
@@ -16,9 +17,9 @@ load_dotenv()
 llm = ChatOllama(model="llama3.2:latest")
 parser = StrOutputParser()
 
-# === Enhanced Prompt Template ===
+# === FIXED Prompt Template ===
 clarification_prompt_template = ChatPromptTemplate.from_template("""
-You are an expert prompt engineering assistant that creates the BEST POSSIBLE AI PROMPTS with strategic guidance.
+You are an expert prompt engineering assistant that helps users iteratively improve their AI prompts.
 
 Conversation History:
 {history}
@@ -27,42 +28,39 @@ Latest User Message:
 {user_input}
 
 Input Context: {input_context}
-Prompt Quality Score: {quality_score}/100
+Current Quality Score: {quality_score}/100
 User Preferences: {preferences}
 
 Current Prompt Draft:
 {draft_prompt}
 
-### Instructions:
-1. Analyze the conversation, user message, and context to understand intent.
-2. If '[FINALIZE REQUEST]' is in the user message, output ONLY a finalized prompt under 'Final Prompt:'.
-3. For all non-final requests, revise the draft prompt to be specific, actionable, and results-focused, and ALWAYS provide a clarifying question.
-4. Consider the quality score and user preferences when refining.
-5. For non-final requests, output the revised prompt as 'Updated Prompt:' followed by a strategic clarifying question.
+### IMPORTANT INSTRUCTIONS:
+1. **NEVER finalize unless user explicitly says "generate now", "finalize", "done", or "finish"**
+2. **ALWAYS provide iterative improvements and ask clarifying questions**
+3. **Only output "Final Prompt:" if user explicitly requests finalization**
+4. **Focus on continuous improvement through conversation**
 
-🔑 Enhanced Clarifying Question Rules (for non-final requests):
-- Must be one focused sentence under 15 words.
-- Be action-oriented and directly improve prompt effectiveness.
-- Include exactly 5 concrete, actionable suggestions in parentheses.
-- Suggestions should be specific and immediately implementable.
-- Format: "Clarifying Question: What specific aspect needs refinement? (e.g., suggestion1, suggestion2, suggestion3, suggestion4, suggestion5)"
+### Your Task:
+- Analyze the user's message and current prompt
+- Make incremental improvements to the prompt
+- Ask ONE specific clarifying question to guide the next improvement
+- Keep the conversation going until user requests finalization
 
-### Quality Enhancement Focus:
-- **Clarity**: Remove ambiguity, add specific instructions.
-- **Context**: Include relevant background information.
-- **Constraints**: Define clear boundaries and limitations.
-- **Output Format**: Specify desired structure and style.
-- **Examples**: Add concrete examples when beneficial.
+### Response Format:
+Updated Prompt: <improved version of the prompt>
+Clarifying Question: <one specific question with 3-5 concrete suggestions in parentheses>
 
-### Output Format:
-For finalization ([FINALIZE REQUEST]):
-Final Prompt: <final optimized prompt>
+### Example Clarifying Questions:
+- "What specific output format would work best? (e.g., bullet points, structured paragraphs, JSON format, step-by-step guide, comparison table)"
+- "How detailed should the response be? (e.g., brief overview, comprehensive analysis, technical deep-dive, beginner-friendly explanation, expert-level detail)"
+- "What context should the AI consider? (e.g., target audience, industry background, use case scenario, constraints, success criteria)"
+
+### ONLY if user explicitly says "generate now", "finalize", "done", or "finish":
+Final Prompt: <polished final version>
 Quality Score: <estimated score>/100
-Key Improvements: <list 3 main enhancements made>
+Key Improvements: <3 main enhancements made>
 
-For iterative refinement:
-Updated Prompt: <revised prompt>
-Clarifying Question: <strategic question with 5 actionable suggestions>
+Remember: Keep improving and asking questions unless explicitly told to finalize!
 """)
 
 chain = clarification_prompt_template | llm | parser
@@ -70,6 +68,11 @@ chain = clarification_prompt_template | llm | parser
 # === Helper Functions ===
 def classify_input(user_message):
     """Advanced input classification with confidence scoring"""
+    # Check for finalization keywords first
+    finalization_keywords = ["generate now", "finalize", "done", "finish", "complete", "ready"]
+    if any(keyword in user_message.lower() for keyword in finalization_keywords):
+        return "finalize"
+    
     keywords = {
         "summarization": ["summary", "summarize", "condense", "brief", "overview"],
         "code": ["code", "programming", "script", "function", "algorithm", "debug"],
@@ -95,19 +98,25 @@ def calculate_quality_score(prompt):
         return 0
     
     score = 0
+    
+    # Length and detail (0-20 points)
     word_count = len(prompt.split())
     if word_count >= 20:
         score += min(20, word_count // 5)
     
+    # Specificity indicators (0-25 points)
     specific_words = ["specific", "exactly", "must", "should", "include", "format", "example"]
     score += min(25, sum(5 for word in specific_words if word.lower() in prompt.lower()))
     
+    # Structure and formatting (0-20 points)
     structure_indicators = [":", "1.", "2.", "3.", "-", "•", "###", "**"]
     score += min(20, sum(3 for indicator in structure_indicators if indicator in prompt))
     
+    # Context and constraints (0-20 points)
     context_words = ["context", "background", "constraint", "limitation", "requirement", "goal"]
     score += min(20, sum(4 for word in context_words if word.lower() in prompt.lower()))
     
+    # Output format specification (0-15 points)
     format_words = ["format", "structure", "output", "result", "response", "style"]
     score += min(15, sum(3 for word in format_words if word.lower() in prompt.lower()))
     
@@ -139,7 +148,7 @@ def get_improvement_suggestions(current_prompt, context):
         ],
         "analysis": [
             "Define analysis methodology or framework",
-            "Specify metrics and KPIs to focus",
+            "Specify metrics and KPIs to focus on",
             "Include data visualization requirements",
             "Add confidence levels or uncertainty handling",
             "Define actionable insights format"
@@ -148,35 +157,59 @@ def get_improvement_suggestions(current_prompt, context):
     
     return suggestions_db.get(context, suggestions_db["general"])
 
-def extract_response_parts(ai_response, current_draft, is_final_request=False):
-    """Enhanced response parsing with quality scoring and fallback for clarifying question"""
-    # Log the raw AI response for debugging
-    st.write("DEBUG: Raw AI Response:", ai_response)
+def extract_response_parts(ai_response, current_draft):
+    """Enhanced response parsing with better finalization detection"""
+    print(f"DEBUG: AI Response: {ai_response}")  # Debug line
     
-    updated_prompt_match = re.search(r"Updated Prompt:\s*(.*?)(?=(Clarifying Question:|Quality Score:|Key Improvements:|$))", ai_response, re.IGNORECASE | re.DOTALL)
-    clarifying_question_match = re.search(r"Clarifying Question:\s*(.*?)(?=(Quality Score:|Key Improvements:|$))", ai_response, re.IGNORECASE | re.DOTALL)
-    final_prompt_match = re.search(r"Final Prompt:\s*(.*?)(?=(Quality Score:|Key Improvements:|$))", ai_response, re.IGNORECASE | re.DOTALL)
-    quality_score_match = re.search(r"Quality Score:\s*(\d+)", ai_response, re.IGNORECASE)
-    improvements_match = re.search(r"Key Improvements:\s*(.*)", ai_response, re.IGNORECASE | re.DOTALL)
+    # Check for finalization first
+    final_prompt_match = re.search(r"Final Prompt:\s*(.*?)(?=Quality Score:|Key Improvements:|$)", ai_response, re.IGNORECASE | re.DOTALL)
     
-    if final_prompt_match or is_final_request:
-        final_prompt = final_prompt_match.group(1).strip() if final_prompt_match else current_draft
-        quality_score = quality_score_match.group(1) if quality_score_match else str(calculate_quality_score(final_prompt))
-        improvements = improvements_match.group(1).strip() if improvements_match else "Enhanced clarity, specificity, and structure"
+    if final_prompt_match:
+        final_prompt = final_prompt_match.group(1).strip()
+        quality_score_match = re.search(r"Quality Score:\s*(\d+)", ai_response, re.IGNORECASE)
+        improvements_match = re.search(r"Key Improvements:\s*(.*)", ai_response, re.IGNORECASE | re.DOTALL)
+        
+        quality_score = quality_score_match.group(1) if quality_score_match else "85"
+        improvements = improvements_match.group(1).strip() if improvements_match else "Enhanced clarity and specificity"
         return final_prompt, None, True, quality_score, improvements
     
-    updated_prompt = updated_prompt_match.group(1).strip() if updated_prompt_match else current_draft
-    clarifying_question = clarifying_question_match.group(1).strip() if clarifying_question_match else None
+    # Otherwise, look for iterative improvement - more flexible parsing
+    updated_prompt = current_draft
+    clarifying_question = None
     
-    # Fallback clarifying question if none provided
-    if not clarifying_question and not is_final_request:
-        context = classify_input(updated_prompt)
-        suggestions = get_improvement_suggestions(updated_prompt, context)[:5]
-        clarifying_question = f"What specific aspect needs refinement? (e.g., {', '.join(suggestions)})"
+    # Try to find Updated Prompt
+    updated_prompt_patterns = [
+        r"Updated Prompt:\s*(.*?)(?=Clarifying Question:|$)",
+        r"Revised Prompt:\s*(.*?)(?=Clarifying Question:|$)",
+        r"Improved Prompt:\s*(.*?)(?=Clarifying Question:|$)"
+    ]
+    
+    for pattern in updated_prompt_patterns:
+        match = re.search(pattern, ai_response, re.IGNORECASE | re.DOTALL)
+        if match:
+            updated_prompt = match.group(1).strip()
+            break
+    
+    # Try to find Clarifying Question
+    question_patterns = [
+        r"Clarifying Question:\s*(.*?)(?=Quality Score:|$)",
+        r"Next Question:\s*(.*?)(?=Quality Score:|$)",
+        r"Question:\s*(.*?)(?=Quality Score:|$)"
+    ]
+    
+    for pattern in question_patterns:
+        match = re.search(pattern, ai_response, re.IGNORECASE | re.DOTALL)
+        if match:
+            clarifying_question = match.group(1).strip()
+            break
+    
+    # If no clarifying question found, create a default one
+    if not clarifying_question:
+        clarifying_question = "What specific aspect would you like to improve next? (e.g., add examples, specify format, include constraints, define audience, clarify goals)"
     
     return updated_prompt, clarifying_question, False, None, None
 
-def stream_text(text, delay=0.03):
+def stream_text(text, delay=0.01):
     """Enhanced text streaming with better formatting"""
     placeholder = st.empty()
     streamed = ""
@@ -212,6 +245,10 @@ if "session_metrics" not in st.session_state:
     st.session_state.session_metrics = {"interactions": 0, "improvements": 0}
 if "prompt_versions" not in st.session_state:
     st.session_state.prompt_versions = []
+if "is_finalized" not in st.session_state:
+    st.session_state.is_finalized = False
+if "should_finalize" not in st.session_state:
+    st.session_state.should_finalize = False
 
 # === UI Header ===
 st.set_page_config(page_title="AI Prompt Enhancer Pro", page_icon="🧠", layout="wide")
@@ -226,15 +263,16 @@ st.markdown("""
 with st.sidebar:
     st.header("🎛️ Control Panel")
     
+    # Quality Score Display
     current_score = calculate_quality_score(st.session_state.draft_prompt)
     st.session_state.quality_score = current_score
     
     fig = go.Figure(go.Indicator(
-        mode="gauge+number",
-        value=current_score,
-        domain={'x': [0, 1], 'y': [0, 1]},
-        title={'text': "Prompt Quality"},
-        gauge={
+        mode = "gauge+number",
+        value = current_score,
+        domain = {'x': [0, 1], 'y': [0, 1]},
+        title = {'text': "Prompt Quality"},
+        gauge = {
             'axis': {'range': [None, 100]},
             'bar': {'color': "darkblue"},
             'steps': [
@@ -252,20 +290,22 @@ with st.sidebar:
     fig.update_layout(height=200)
     st.plotly_chart(fig, use_container_width=True)
     
+    # Finalization Status
+    if st.session_state.is_finalized:
+        st.success("✅ Prompt Finalized!")
+    else:
+        st.info("🔄 Iterative Mode")
+    
+    # Current Draft Display
     st.markdown("**📝 Current Draft:**")
     with st.expander("View Current Prompt", expanded=False):
-        if st.session_state.draft_prompt != "No draft yet.":
-            st.code(st.session_state.draft_prompt, language='text')
-            if st.button("📋 Quick Copy", key="sidebar_copy"):
-                st.toast("Copied to clipboard!", icon="✅")
-        else:
-            st.info("No prompt draft yet. Start by describing your AI task!")
+        st.code(st.session_state.draft_prompt, language='markdown')
     
+    # Action Buttons
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🎯 Finalize Now", use_container_width=True, type="primary"):
-            st.session_state.conversation_history.append("User: generate now")
-            st.rerun()
+        if st.button("📋 Copy", use_container_width=True):
+            st.toast("Copied to clipboard!", icon="✅")
     with col2:
         if st.button("💾 Export", use_container_width=True):
             export_data = export_session_data()
@@ -273,17 +313,25 @@ with st.sidebar:
                 label="Download Session",
                 data=export_data,
                 file_name=f"prompt_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json",
-                key="export_session"
+                mime="application/json"
             )
     
+    # Finalize Button
+    if not st.session_state.is_finalized and st.session_state.draft_prompt != "No draft yet.":
+        if st.button("🎯 Finalize Prompt", use_container_width=True, type="primary"):
+            # Set a flag to trigger finalization
+            st.session_state.should_finalize = True
+            st.rerun()
+    
     if st.button("🔄 New Session", use_container_width=True):
-        for key in ["conversation_history", "draft_prompt", "quality_score", "prompt_versions", "session_metrics"]:
+        for key in ["conversation_history", "draft_prompt", "quality_score", "prompt_versions", "session_metrics", "is_finalized", "should_finalize"]:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
     
     st.markdown("---")
+    
+    # Enhanced Settings
     st.markdown("### ⚙️ Preferences")
     
     st.session_state.input_context = st.selectbox(
@@ -312,7 +360,9 @@ with st.sidebar:
         help="What output formats do you typically need?"
     )
     
+    # Quick Actions
     st.markdown("### ⚡ Quick Actions")
+    
     if st.button("🎯 Focus on Clarity", use_container_width=True):
         st.session_state.conversation_history.append("User: Please focus on making the prompt clearer and more specific")
         st.rerun()
@@ -325,6 +375,7 @@ with st.sidebar:
         st.session_state.conversation_history.append("User: Add success metrics and evaluation criteria")
         st.rerun()
     
+    # Session Metrics
     st.markdown("---")
     st.markdown("### 📊 Session Stats")
     metrics = st.session_state.session_metrics
@@ -339,8 +390,10 @@ with st.sidebar:
 col1, col2 = st.columns([2, 1])
 
 with col1:
+    # Chat Interface
     st.markdown("### 💬 Interactive Enhancement")
     
+    # Quick Start Templates
     with st.expander("🚀 Quick Start Templates", expanded=False):
         templates = {
             "Content Creation": "Create engaging content about [topic] for [audience] in [format]",
@@ -355,6 +408,7 @@ with col1:
                 st.session_state.conversation_history.append(f"User: {template}")
                 st.rerun()
     
+    # Conversation Display
     with st.expander("💬 Conversation History", expanded=st.session_state.history_expanded):
         for i, message in enumerate(st.session_state.conversation_history):
             if message.startswith("User:"):
@@ -364,55 +418,115 @@ with col1:
                 with st.chat_message("assistant"):
                     st.success("✅ **Final Enhanced Prompt Generated!**")
                     st.markdown(message.replace("AI: Final Prompt: ", ""))
-            elif message.startswith("AI: Updated Prompt:"):
+            elif message.startswith("AI:"):
                 with st.chat_message("assistant"):
                     content = message.replace("AI: ", "")
                     if "Updated Prompt:" in content:
-                        prompt_part = content.split("Updated Prompt:")[1].split("Clarifying Question:")[0].strip()
-                        st.markdown(f"**🔄 Updated Prompt:**\n{prompt_part}")
-                    if "Clarifying Question:" in content:
-                        question_part = content.split("Clarifying Question:")[1].strip()
-                        st.markdown(f"**❓ Next Step:**\n{question_part}")
+                        parts = content.split("Updated Prompt:")
+                        if len(parts) > 1:
+                            remaining = parts[1]
+                            if "Clarifying Question:" in remaining:
+                                prompt_part = remaining.split("Clarifying Question:")[0].strip()
+                                question_part = remaining.split("Clarifying Question:")[1].strip()
+                                st.markdown(f"**🔄 Updated Prompt:**\n{prompt_part}")
+                                st.markdown(f"**❓ Next Step:**\n{question_part}")
+                            else:
+                                st.markdown(f"**🔄 Updated Prompt:**\n{remaining.strip()}")
+                    else:
+                        st.markdown(content)
 
 with col2:
+    # Prompt Analytics
     st.markdown("### 📈 Prompt Analytics")
     
     if st.session_state.prompt_versions:
+        # Version History
         st.markdown("**📚 Version History:**")
-        for i, version in enumerate(st.session_state.prompt_versions[-5:]):
+        for i, version in enumerate(st.session_state.prompt_versions[-5:]):  # Show last 5 versions
             score = calculate_quality_score(version)
             st.markdown(f"v{i+1}: {score}/100")
     
+    # Improvement Suggestions
     st.markdown("**💡 Smart Suggestions:**")
     suggestions = get_improvement_suggestions(st.session_state.draft_prompt, st.session_state.input_context)
-    for suggestion in suggestions[:3]:
+    for suggestion in suggestions[:3]:  # Show top 3
         if st.button(f"✨ {suggestion}", key=f"suggestion_{suggestion[:20]}"):
             st.session_state.conversation_history.append(f"User: {suggestion}")
             st.rerun()
 
 # === Enhanced Chat Input ===
 st.markdown("---")
-user_message = st.chat_input("💭 Describe your AI task or ask for improvements... (Type 'generate now', 'finalize', 'done', or click 'Finalize Now' when ready)")
 
-col1, col2, col3 = st.columns([1, 1, 1])
-with col2:
-    if st.button("🚀 **FINALIZE PROMPT NOW**", use_container_width=True, type="primary"):
-        user_message = "generate now"
+# Show different input prompts based on finalization status
+if st.session_state.is_finalized:
+    input_placeholder = "💭 Your prompt is finalized! Start a new session to create another prompt..."
+    disabled = True
+else:
+    input_placeholder = "💭 Describe your AI task or ask for improvements... (Click 'Finalize Prompt' in sidebar when ready)"
+    disabled = False
 
-if user_message:
-    finalization_keywords = ["generate now", "finalize", "done", "final", "complete", "finish"]
-    is_finalization_request = any(keyword in user_message.lower() for keyword in finalization_keywords)
+# Check if finalization was requested via button
+if st.session_state.should_finalize:
+    user_message = "generate now"
+    st.session_state.should_finalize = False
+    st.session_state.conversation_history.append("User: " + user_message)
     
+    # Process finalization immediately
+    chain_inputs = {
+        "history": "\n".join(st.session_state.conversation_history),
+        "user_input": user_message,
+        "input_context": st.session_state.input_context,
+        "draft_prompt": st.session_state.draft_prompt,
+        "quality_score": st.session_state.quality_score,
+        "preferences": str(st.session_state.user_preferences)
+    }
+
+    with st.spinner("🤖 Finalizing your prompt..."):
+        try:
+            ai_response = chain.invoke(chain_inputs)
+            
+            result = extract_response_parts(ai_response, st.session_state.draft_prompt)
+            updated_prompt, clarifying_question, is_final, quality_score, improvements = result
+            
+            if is_final:
+                st.session_state.conversation_history.append(f"AI: Final Prompt: {updated_prompt}")
+                st.session_state.draft_prompt = updated_prompt
+                st.session_state.session_metrics["improvements"] += 1
+                st.session_state.is_finalized = True
+                
+                # Show final result with celebration
+                st.balloons()
+                st.success("🎉 **Final Enhanced Prompt Generated!**")
+                st.markdown(f"**Quality Score:** {quality_score}/100")
+                if improvements:
+                    st.markdown(f"**Key Improvements:** {improvements}")
+                st.markdown("---")
+                st.markdown(updated_prompt)
+            else:
+                st.error("Failed to finalize. Please try again.")
+                
+        except Exception as e:
+            st.error(f"⚠️ Error during finalization: {e}")
+
+user_message = st.chat_input(input_placeholder, disabled=disabled)
+
+if user_message and not st.session_state.is_finalized:
+    # Update metrics
     st.session_state.session_metrics["interactions"] += 1
     
+    # Save current prompt version
     if st.session_state.draft_prompt != "No draft yet.":
         st.session_state.prompt_versions.append(st.session_state.draft_prompt)
     
     st.session_state.conversation_history.append("User: " + user_message)
     
+    # Check if this is a finalization request
+    input_type = classify_input(user_message)
+    
+    # Prepare enhanced inputs
     chain_inputs = {
         "history": "\n".join(st.session_state.conversation_history),
-        "user_input": user_message + (" [FINALIZE REQUEST]" if is_finalization_request else ""),
+        "user_input": user_message,
         "input_context": st.session_state.input_context,
         "draft_prompt": st.session_state.draft_prompt,
         "quality_score": st.session_state.quality_score,
@@ -427,141 +541,24 @@ if user_message:
             ai_response = None
 
     if ai_response:
-        result = extract_response_parts(ai_response, st.session_state.draft_prompt, is_finalization_request)
+        result = extract_response_parts(ai_response, st.session_state.draft_prompt)
         updated_prompt, clarifying_question, is_final, quality_score, improvements = result
         
         if is_final:
             st.session_state.conversation_history.append(f"AI: Final Prompt: {updated_prompt}")
             st.session_state.draft_prompt = updated_prompt
             st.session_state.session_metrics["improvements"] += 1
+            st.session_state.is_finalized = True
             
-            # Extended animation: Repeat balloons multiple times
-            for _ in range(3):
-                st.balloons()
-                time.sleep(1.5)
-            
+            # Show final result with celebration
+            st.balloons()
             with st.chat_message("assistant"):
                 st.success("🎉 **Final Enhanced Prompt Generated!**")
-                
-                col1, col2, col3 = st.columns([2, 1, 1])
-                with col1:
-                    st.markdown(f"**Quality Score:** {quality_score}/100")
-                with col2:
-                    # JavaScript for reliable clipboard copying
-                    st.markdown("""
-                    <button onclick="copyToClipboard()" class="copy-btn">📋 Copy Prompt</button>
-                    <script>
-                    function copyToClipboard() {
-                        const text = document.getElementById('final-prompt-text').innerText.replace('📝 ', '');
-                        navigator.clipboard.writeText(text).then(() => {
-                            const toast = document.createElement('div');
-                            toast.innerText = '✅ Prompt copied to clipboard!';
-                            toast.style.position = 'fixed';
-                            toast.style.bottom = '20px';
-                            toast.style.right = '20px';
-                            toast.style.background = '#10b981';
-                            toast.style.color = 'white';
-                            toast.style.padding = '10px 20px';
-                            toast.style.borderRadius = '5px';
-                            toast.style.zIndex = '1000';
-                            document.body.appendChild(toast);
-                            setTimeout(() => toast.remove(), 3000);
-                        });
-                    }
-                    </script>
-                    <style>
-                    .copy-btn {
-                        background: linear-gradient(90deg, #7c3aed, #db2777);
-                        color: white;
-                        padding: 12px 24px;
-                        border: none;
-                        border-radius: 8px;
-                        cursor: pointer;
-                        font-size: 18px;
-                        font-weight: bold;
-                        transition: transform 0.2s, box-shadow 0.2s;
-                    }
-                    .copy-btn:hover {
-                        transform: scale(1.05);
-                        box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-                    }
-                    </style>
-                    """, unsafe_allow_html=True)
-                with col3:
-                    st.download_button(
-                        label="💾 Download",
-                        data=updated_prompt,
-                        file_name=f"final_prompt_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                        mime="text/plain",
-                        key="download_final"
-                    )
-                
+                st.markdown(f"**Quality Score:** {quality_score}/100")
                 if improvements:
                     st.markdown(f"**Key Improvements:** {improvements}")
-                
                 st.markdown("---")
-                st.markdown("### 📜 **Your Final Prompt**")
-                with st.container():
-                    st.markdown(f"""
-                    <div style='background: linear-gradient(135deg, #c4b5fd, #f9a8d4); 
-                                padding: 30px; 
-                                border-radius: 15px; 
-                                border: 3px solid #4b5563; 
-                                box-shadow: 0 6px 20px rgba(0,0,0,0.25); 
-                                margin: 20px 0;'>
-                        <div style='background: #ffffff; 
-                                    padding: 25px; 
-                                    border-radius: 10px; 
-                                    color: #1f2937; 
-                                    font-family: "Courier New", monospace; 
-                                    font-size: 18px; 
-                                    line-height: 1.8; 
-                                    white-space: pre-wrap; 
-                                    word-wrap: break-word; 
-                                    max-height: 400px; 
-                                    overflow-y: auto; 
-                                    border-left: 6px solid #7c3aed;'>
-                            <span id='final-prompt-text'>📝 {updated_prompt}</span>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                st.markdown("### 🚀 **What's Next?**")
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    if st.button("🔄 Refine Further", key="refine_more"):
-                        st.session_state.conversation_history.append("User: Let's refine this prompt further")
-                        st.rerun()
-                with col2:
-                    if st.button("🎯 Test Prompt", key="test_prompt"):
-                        st.info("💡 Test your prompt with different AI models to ensure effectiveness!")
-                with col3:
-                    if st.button("📊 Analytics", key="view_analytics"):
-                        st.session_state.show_analytics = True
-                        st.rerun()
-                with col4:
-                    if st.button("🆕 New Prompt", key="new_prompt"):
-                        for key in ["conversation_history", "draft_prompt", "prompt_versions"]:
-                            if key in st.session_state:
-                                del st.session_state[key]
-                        st.rerun()
-                
-                with st.expander("💡 **Usage Tips for Your Final Prompt**", expanded=False):
-                    st.markdown("""
-                    **Best Practices:**
-                    - Test with multiple AI models for consistency
-                    - Adjust complexity based on your specific use case
-                    - Consider adding examples for better results
-                    - Monitor AI responses and iterate as needed
-                    
-                    **Prompt Optimization:**
-                    - Use specific, actionable language
-                    - Define clear success criteria
-                    - Include context and constraints
-                    - Specify desired output format
-                    """)
-                
-                stream_text("✨ Your enhanced prompt is ready to use!", delay=0.03)
+                stream_text(updated_prompt)
         else:
             old_score = st.session_state.quality_score
             st.session_state.draft_prompt = updated_prompt
@@ -578,7 +575,7 @@ if user_message:
             
             with st.chat_message("assistant"):
                 st.info(f"📊 Quality Score: {old_score} → {new_score}")
-                stream_text(ai_display, delay=0.03)
+                stream_text(ai_display)
         
         st.rerun()
 
