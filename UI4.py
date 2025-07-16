@@ -36,16 +36,16 @@ Current Prompt Draft:
 ### Instructions:
 1. Analyze the conversation, user message, and context to understand intent.
 2. If '[FINALIZE REQUEST]' is in the user message, output ONLY a finalized prompt under 'Final Prompt:'.
-3. Otherwise, revise the draft prompt to be specific, actionable, and results-focused.
+3. For all non-final requests, revise the draft prompt to be specific, actionable, and results-focused, and ALWAYS provide a clarifying question.
 4. Consider the quality score and user preferences when refining.
-5. For non-final requests, output the revised prompt as 'Updated Prompt:' and provide a strategic clarifying question.
+5. For non-final requests, output the revised prompt as 'Updated Prompt:' followed by a strategic clarifying question.
 
 🔑 Enhanced Clarifying Question Rules (for non-final requests):
 - Must be one focused sentence under 15 words.
 - Be action-oriented and directly improve prompt effectiveness.
 - Include exactly 5 concrete, actionable suggestions in parentheses.
 - Suggestions should be specific and immediately implementable.
-- Format: "What specific aspect needs refinement? (e.g., suggestion1, suggestion2, suggestion3, suggestion4, suggestion5)"
+- Format: "Clarifying Question: What specific aspect needs refinement? (e.g., suggestion1, suggestion2, suggestion3, suggestion4, suggestion5)"
 
 ### Quality Enhancement Focus:
 - **Clarity**: Remove ambiguity, add specific instructions.
@@ -149,10 +149,13 @@ def get_improvement_suggestions(current_prompt, context):
     return suggestions_db.get(context, suggestions_db["general"])
 
 def extract_response_parts(ai_response, current_draft, is_final_request=False):
-    """Enhanced response parsing with quality scoring"""
-    updated_prompt_match = re.search(r"Updated Prompt:\s*(.*?)(?=Clarifying Question:|Quality Score:|Key Improvements:|$)", ai_response, re.IGNORECASE | re.DOTALL)
-    clarifying_question_match = re.search(r"Clarifying Question:\s*(.*?)(?=Quality Score:|Key Improvements:|$)", ai_response, re.IGNORECASE | re.DOTALL)
-    final_prompt_match = re.search(r"Final Prompt:\s*(.*?)(?=Quality Score:|Key Improvements:|$)", ai_response, re.IGNORECASE | re.DOTALL)
+    """Enhanced response parsing with quality scoring and fallback for clarifying question"""
+    # Log the raw AI response for debugging
+    st.write("DEBUG: Raw AI Response:", ai_response)
+    
+    updated_prompt_match = re.search(r"Updated Prompt:\s*(.*?)(?=(Clarifying Question:|Quality Score:|Key Improvements:|$))", ai_response, re.IGNORECASE | re.DOTALL)
+    clarifying_question_match = re.search(r"Clarifying Question:\s*(.*?)(?=(Quality Score:|Key Improvements:|$))", ai_response, re.IGNORECASE | re.DOTALL)
+    final_prompt_match = re.search(r"Final Prompt:\s*(.*?)(?=(Quality Score:|Key Improvements:|$))", ai_response, re.IGNORECASE | re.DOTALL)
     quality_score_match = re.search(r"Quality Score:\s*(\d+)", ai_response, re.IGNORECASE)
     improvements_match = re.search(r"Key Improvements:\s*(.*)", ai_response, re.IGNORECASE | re.DOTALL)
     
@@ -164,6 +167,12 @@ def extract_response_parts(ai_response, current_draft, is_final_request=False):
     
     updated_prompt = updated_prompt_match.group(1).strip() if updated_prompt_match else current_draft
     clarifying_question = clarifying_question_match.group(1).strip() if clarifying_question_match else None
+    
+    # Fallback clarifying question if none provided
+    if not clarifying_question and not is_final_request:
+        context = classify_input(updated_prompt)
+        suggestions = get_improvement_suggestions(updated_prompt, context)[:5]
+        clarifying_question = f"What specific aspect needs refinement? (e.g., {', '.join(suggestions)})"
     
     return updated_prompt, clarifying_question, False, None, None
 
@@ -443,7 +452,7 @@ if user_message:
                     <button onclick="copyToClipboard()" class="copy-btn">📋 Copy Prompt</button>
                     <script>
                     function copyToClipboard() {
-                        const text = document.getElementById('final-prompt-text').innerText;
+                        const text = document.getElementById('final-prompt-text').innerText.replace('📝 ', '');
                         navigator.clipboard.writeText(text).then(() => {
                             const toast = document.createElement('div');
                             toast.innerText = '✅ Prompt copied to clipboard!';
